@@ -61,6 +61,9 @@ URL of a service for retrieving external IP addresses
 .TP
 .BR check_updates
 Check for program updates on GitHub (opt-in)
+.TP
+.BR auto_create_records
+Automatically create missing DNS records (default: false)
 .SS defaults
 .TP
 .BR type

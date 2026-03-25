@@ -17,6 +17,7 @@ conf_request_timeout=10
 conf_api_url='https://api.hetzner.cloud/v1'
 conf_ip_url='https://ip.hetzner.com/'
 conf_check_updates=0
+conf_auto_create_records=0
 
 log() {
     level="$1"
@@ -131,7 +132,8 @@ Configuration:
       "request_timeout": Maximum duration of HTTP requests
       "api_url": URL of the Hetzner Console'\''s API
       "ip_url": URL of a service for retrieving external IP addresses
-      "check_updates": Check for program updates on GitHub (opt-in)
+      "check_updates": Check for program updates on GitHub (default: false)
+      "auto_create_records": Automatically create missing DNS records (default: false)
     }
 
     "defaults": {
@@ -319,7 +321,7 @@ load_settings() {
              conf_log_level='WARN';;
         error|ERROR|1)
             conf_log_level='ERROR';;
-        none|NONE|false|FALSE|0)
+        none|NONE|false|FALSE|off|OFF|0)
             conf_log_level='NONE';;
         *)
             conf_log_level='ERROR' log 'ERROR' 'Invalid log level'
@@ -327,6 +329,14 @@ load_settings() {
     esac
     # shellcheck disable=SC2097 disable=SC2098
     conf_log_level='INFO' log 'INFO' "Set log level to '$conf_log_level'"
+    case "$conf_auto_create_records" in
+        1|true|TRUE|yes|YES|on|ON)
+            conf_auto_create_records=1;
+            log 'INFO' 'Automatic missing record creation is enabled'
+            ;;
+        *)
+            conf_auto_create_records=0;;
+    esac
 }
 
 load_records() {
@@ -451,8 +461,13 @@ EOF
                 jq '.rrset.records | length'
         )"
         if [ "$record_entries" -eq 0 ]; then
-            log 'ERROR' "$record_type record '$record_name' for domain '$record_domain' doesn't exist in Hetzner Console"
-            return 1
+            if [ "$conf_auto_create_records" = 1 ]; then
+                log 'INFO' "$record_type record '$record_name' for domain '$record_domain' does not exist and will be created"
+            else
+                log 'ERROR' "$record_type record '$record_name' for domain '$record_domain' doesn't exist in Hetzner Console"
+                log 'INFO' "To allow automatic record creation set \`auto_create_records\` option to true"
+                return 1
+            fi
         elif [ "$record_entries" -gt 1 ]; then
             log 'ERROR' "$record_type record '$record_name' for domain '$record_domain' has more than one entry"
             return 1
@@ -629,16 +644,37 @@ update_record() {
     esac
     expected_value="$(cat "$state_dir/if_${interface}_ipv${version}_addr")"
     if [ -z "$expected_value" ]; then
+        log 'WARN' "Failed reading IPv$version address of interface '$interface'"
         log 'WARN' "Skipping update of $type record $name for domain $domain"
         return 1
     fi
+    record_comment="Modified by $program on $(uname -n) at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     if [ -z "$current_value" ] || [ "$current_value" = 'null' ]; then
-        log 'WARN' "Unable to fetch value of $type record $name for domain $domain"
-        return 1
-    fi
-    if [ -z "$current_value" ] || [ "$current_value" = 'null' ]; then
-        log 'WARN' "Failed reading IPv$version address of interface '$interface'"
-        return 1
+        if [ "$conf_auto_create_records" = 1 ]; then
+            if curl -s -X POST -H "Authorization: Bearer $api_key" \
+                    -H "Content-Type: application/json" \
+                    -d "{
+                        \"name\": \"$name\",
+                        \"type\": \"$type\",
+                        \"ttl\": $ttl,
+                        \"records\": [
+                            {
+                                \"value\": \"$expected_value\",
+                                \"comment\": \"$record_comment\"
+                            }
+                        ]
+                    }" \
+                    "$conf_api_url/zones/$domain/rrsets" >/dev/null; then
+                log 'INFO' "Created $type record '$name' for domain '$domain': $expected_value"
+            else
+                log 'WARN' "Unable to create $type record '$name' for domain '$domain'"
+                return 1
+            fi
+        else
+            log 'WARN' "Unable to fetch value of $type record '$name' for domain '$domain'"
+            return 1
+        fi
+        return
     fi
     if [ "$current_value" = "$expected_value" ]; then
         log 'INFO' "Keep existing value of $type record '$name' for domain '$domain'"
@@ -649,7 +685,7 @@ update_record() {
                 \"records\": [
                     {
                         \"value\": \"$expected_value\",
-                        \"comment\": \"Managed by $program on $(uname -n)\"
+                        \"comment\": \"$record_comment\"
                     }
                 ]
             }" \
