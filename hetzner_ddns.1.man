@@ -52,6 +52,15 @@ URL of the Hetzner Console's API
 .TP
 .BR ip_url
 URL of a service for retrieving external IP addresses
+.TP
+.BR ipv6_event_monitor
+Enable immediate IPv6-triggered updates on Linux (true/false)
+.TP
+.BR ipv6_event_cooldown
+Minimal number of seconds between IPv6 event triggers
+.TP
+.BR ipv6_event_require_global
+React only to global IPv6 addresses (true/false)
 .SS defaults
 .TP
 .BR type

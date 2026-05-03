@@ -2,7 +2,11 @@
   "version": "1.0.1",
   "api_key": "****************************************************************",
   "api_key_file": "/path/to/api_key_file",
-  "settings": {},
+  "settings": {
+    "ipv6_event_monitor": false,
+    "ipv6_event_cooldown": 10,
+    "ipv6_event_require_global": true
+  },
   "defaults": {
     "ttl": 60
   },

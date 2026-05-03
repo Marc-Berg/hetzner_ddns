@@ -13,6 +13,9 @@ conf_ip_check_cooldown=30
 conf_request_timeout=10
 conf_api_url='https://api.hetzner.cloud/v1'
 conf_ip_url='https://ip.hetzner.com/'
+conf_ipv6_event_monitor='true'
+conf_ipv6_event_cooldown=10
+conf_ipv6_event_require_global='true'
 
 log() {
     if test -r "$conf_log_file"; then
@@ -94,6 +97,9 @@ Configuration:
       "request_timeout": Maximum duration of HTTP requests
       "api_url": URL of the Hetzner Console'\''s API
       "ip_url": URL of a service for retrieving external IP addresses
+            "ipv6_event_monitor": Enable immediate IPv6-triggered updates on Linux (true/false)
+            "ipv6_event_cooldown": Minimal number of seconds between IPv6 event triggers
+            "ipv6_event_require_global": React only to global IPv6 addresses (true/false)
     }
 
     "defaults": {
@@ -177,7 +183,14 @@ load_and_test_api_key() {
 
     # also try to load the api_key from .api_key_file
     api_key_file_path=$(jq -r '.api_key_file' "$cfg_file")
-    api_key_from_file="$(cat "$api_key_file_path")"
+    api_key_from_file=''
+    if [ -n "$api_key_file_path" ] && [ "$api_key_file_path" != 'null' ]; then
+        if [ ! -r "$api_key_file_path" ]; then
+            log "Error: API key file '$api_key_file_path' is not readable"
+            return 1
+        fi
+        api_key_from_file="$(cat "$api_key_file_path")"
+    fi
 
     if ([ -z "$api_key" ] || [ "$api_key" = 'null' ]) && [ -z "$api_key_from_file" ]; then
         log 'Error: API key neither provided through api_key in config.json nor through api_key_file'
@@ -214,6 +227,30 @@ load_settings() {
     if [ "$(jq -r '.settings' "$cfg_file")" != 'null' ]; then
         eval "$(jq -r '.settings | to_entries[] | "conf_\(.key)='\''\(.value|tostring)'\''"' "$cfg_file")"
         log 'Loaded user settings from configuration file'
+    fi
+}
+
+validate_settings() {
+    case "$conf_ipv6_event_monitor" in
+        true|false) ;;
+        *)
+            conf_ipv6_event_monitor='false'
+            log "Warning: Invalid value of ipv6_event_monitor, falling back to '$conf_ipv6_event_monitor'";;
+    esac
+    case "$conf_ipv6_event_require_global" in
+        true|false) ;;
+        *)
+            conf_ipv6_event_require_global='true'
+            log "Warning: Invalid value of ipv6_event_require_global, falling back to '$conf_ipv6_event_require_global'";;
+    esac
+    case "$conf_ipv6_event_cooldown" in
+        *[!0-9]*|'')
+            conf_ipv6_event_cooldown=10
+            log "Warning: Invalid value of ipv6_event_cooldown, falling back to '$conf_ipv6_event_cooldown'";;
+    esac
+    if [ "$conf_ipv6_event_cooldown" -lt 1 ]; then
+        conf_ipv6_event_cooldown=1
+        log "Warning: Value of ipv6_event_cooldown too small, falling back to '$conf_ipv6_event_cooldown'"
     fi
 }
 
@@ -449,12 +486,114 @@ spawn_event_tickers() {
     log 'Spawned background tickers'
 }
 
+watch_interface_ipv6_events() {
+    interface="$1"
+    trigger_ts_file="$state_dir/ipv6_watcher_ts_${interface}"
+    last_addr_file="$state_dir/ipv6_watcher_last_addr_${interface}"
+    echo "0" > "$trigger_ts_file"
+    select_linux_ipv6_address "$interface" > "$last_addr_file"
+    log "Started IPv6 event watcher for interface '$interface'"
+    while :; do
+        ip -6 monitor address dev "$interface" 2>/dev/null | while IFS= read -r line; do
+            case "$line" in
+                *" inet6 "*) ;;
+                *) continue;;
+            esac
+            case "$line" in
+                Deleted*|*" deprecated "*) continue;;
+            esac
+            if [ "$conf_ipv6_event_require_global" = 'true' ]; then
+                case "$line" in
+                    *" scope global "*) ;;
+                    *) continue;;
+                esac
+            fi
+            # If address is still tentative, skip for now;
+            # the subsequent stable event will trigger the update
+            case "$line" in
+                *" tentative "*) continue;;
+            esac
+            address="${line#* inet6 }"
+            address="${address%%/*}"
+            if [ -z "$address" ]; then
+                continue
+            fi
+            case "$address" in
+                fc*|fd*) continue;;
+            esac
+            last_address="$(cat "$last_addr_file" 2>/dev/null)"
+            if [ "$last_address" = "$address" ]; then
+                continue
+            fi
+            last_trigger="$(cat "$trigger_ts_file" 2>/dev/null || echo 0)"
+            now="$(date +%s)"
+            if [ $((now - last_trigger)) -lt "$conf_ipv6_event_cooldown" ]; then
+                continue
+            fi
+            echo "$now" > "$trigger_ts_file"
+            echo "$address" > "$last_addr_file"
+            log "Interface '$interface' has a new IPv6 address $address"
+            trigger_manual_update
+        done
+        log "Warning: IPv6 event watcher for interface '$interface' restarted after monitor stream ended"
+        sleep 1
+    done
+}
+
+spawn_ipv6_event_watchers() {
+    if [ "$conf_ipv6_event_monitor" != 'true' ]; then
+        return
+    fi
+    if ! command -v ip 1>/dev/null 2>/dev/null; then
+        log "Warning: IPv6 event monitor is enabled but 'ip' command is unavailable; using TTL-based checks"
+        return
+    fi
+    watchers=0
+    for i in $(printf '%s' "$records" | awk '$3 == "AAAA" { print $5 }' | sort | uniq); do
+        watch_interface_ipv6_events "$i" &
+        echo "$!" >> "$long_processes"
+        watchers=$((watchers + 1))
+    done
+    if [ "$watchers" -gt 0 ]; then
+        log "Spawned $watchers IPv6 event watcher(s)"
+    else
+        log 'No AAAA records found for IPv6 event monitoring'
+    fi
+}
+
+select_linux_ipv6_address() {
+    interface="$1"
+    if ! command -v ip 1>/dev/null 2>/dev/null; then
+        return 1
+    fi
+    ip -6 addr show dev "$interface" scope global 2>/dev/null | awk '
+        $1 == "inet6" {
+            address=$2
+            sub(/\/.*/, "", address)
+            deprecated=(index($0, " deprecated ") > 0 || $0 ~ / deprecated$/)
+            tentative=(index($0, " tentative ") > 0 || $0 ~ / tentative$/)
+            ula=(address ~ /^(fc|fd)[0-9a-fA-F]*:/)
+            if (!deprecated && !tentative && !ula && preferred_public == "") {
+                preferred_public=address
+            }
+            if (!ula && fallback_public == "") {
+                fallback_public=address
+            }
+        }
+        END {
+            if (preferred_public != "") print preferred_public
+            else if (fallback_public != "") print fallback_public
+        }
+    '
+}
+
 start_event_loop() {
     log 'Started record update event loop'
     # Register manual update trigger
     trap trigger_manual_update USR1
     # Re-register cleanup if detached
     trap cleanup_service_state TERM INT
+    spawn_ipv6_event_watchers
     while true; do
         while IFS= read -r ttl; do
             # Process the records whose TTL expired
@@ -475,10 +614,15 @@ update_interface_ip() {
         return
     fi
     old_value="$(cat "$state_dir/if_${interface}_ipv${version}_addr")"
-    new_value="$(
-        curl --connect-timeout "$conf_request_timeout" --max-time "$conf_request_timeout" \
-            --interface "$interface" -"$version" "$conf_ip_url" 2>/dev/null
-    )"
+    if [ "$version" = '6' ]; then
+        new_value="$(select_linux_ipv6_address "$interface")"
+    fi
+    if [ -z "$new_value" ]; then
+        new_value="$(
+            curl --connect-timeout "$conf_request_timeout" --max-time "$conf_request_timeout" \
+                --interface "$interface" -"$version" "$conf_ip_url" 2>/dev/null
+        )"
+    fi
     if [ -z "$new_value" ]; then
         log "Warning: Could not fetch new IPv$version address for interface '$interface'"
         return 1
@@ -609,6 +753,7 @@ log "Starting $program $version"
     test_cfg_file && \
     load_settings && \
     create_log_file && \
+    validate_settings && \
     load_and_test_api_key && \
     load_records && \
     test_interfaces && \
