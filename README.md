@@ -175,10 +175,32 @@ It will update both `A` and `AAAA` records for domain root `example.com` and its
       "ip_check_cooldown": 30, // Time between subsequent checks of interface's IP address
       "request_timeout": 10, // Maximum duration of HTTP requests
       "api_url": "https://api.hetzner.cloud/v1", // URL of the Hetzner Console's API
-      "ip_url": "https://ip.hetzner.com/" // URL of a service for retreiving external IP addresses
+      "ip_url": "https://ip.hetzner.com/", // URL of a service for retreiving external IP addresses
+      "ipv6_event_monitor": false, // Linux-only: trigger immediate updates from IPv6 interface events
+      "ipv6_event_cooldown": 10, // Minimal number of seconds between event-driven update triggers
+      "ipv6_event_require_global": true // Process only global-scoped IPv6 events
     }
   }
   ```
+
+  <details>
+      <summary>
+          <b>IPv6 event monitoring (Linux)</b>
+      </summary>
+
+  If enabled, the daemon starts a watcher per interface used by `AAAA` records and listens for address changes via `ip -6 monitor address`.
+
+  - `ipv6_event_monitor=true` enables immediate update triggers when a valid IPv6 change event is detected.
+  - `ipv6_event_cooldown` rate limits how often event-driven updates can be triggered.
+  - `ipv6_event_require_global=true` limits events to globally scoped IPv6 addresses.
+
+  Event-based updates reuse the existing update pipeline, so regular TTL-based checks still stay active as a fallback.
+
+  > [!NOTE]
+  > This feature is Linux-specific and requires the `ip` command (`iproute2`).
+  > If unavailable, the daemon logs a warning and continues with TTL-based checks only.
+
+  </details>
 
   An example of a configuration tree can be found [here](./hetzner_ddns.json).
 
