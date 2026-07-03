@@ -58,6 +58,9 @@ URL of the Hetzner Console's API
 .TP
 .BR ip_url
 URL of a service for retrieving external IP addresses
+.TP
+.BR check_updates
+Check for program updates on GitHub (opt-in)
 .SS defaults
 .TP
 .BR type

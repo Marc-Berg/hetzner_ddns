@@ -177,7 +177,8 @@ It will update both `A` and `AAAA` records for domain root `example.com` and its
       "ip_check_cooldown": 30, // Time between subsequent checks of interface's IP address
       "request_timeout": 10, // Maximum duration of HTTP requests
       "api_url": "https://api.hetzner.cloud/v1", // URL of the Hetzner Console's API
-      "ip_url": "https://ip.hetzner.com/" // URL of a service for retreiving external IP addresses
+      "ip_url": "https://ip.hetzner.com/", // URL of a service for retreiving external IP addresses
+      "check_updates": true // Check for program updates on GitHub (opt-in)
     }
   }
   ```

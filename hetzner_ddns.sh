@@ -2,6 +2,8 @@
 
 program='hetzner_ddns'
 version='1.1.0'
+upstream='https://github.com/filiparag/hetzner_ddns'
+update_api='https://api.github.com/repos/filiparag/hetzner_ddns/releases/latest'
 detach=0
 verbose=0
 cfg_file="/usr/local/etc/${program}.json"
@@ -14,6 +16,7 @@ conf_ip_check_cooldown=30
 conf_request_timeout=10
 conf_api_url='https://api.hetzner.cloud/v1'
 conf_ip_url='https://ip.hetzner.com/'
+conf_check_updates=0
 
 log() {
     level="$1"
@@ -128,6 +131,7 @@ Configuration:
       "request_timeout": Maximum duration of HTTP requests
       "api_url": URL of the Hetzner Console'\''s API
       "ip_url": URL of a service for retrieving external IP addresses
+      "check_updates": Check for program updates on GitHub (opt-in)
     }
 
     "defaults": {
@@ -203,6 +207,46 @@ check_daemon_already_running() {
             log 'ERROR' "Another daemon is already running as process $daemon_pid"
             return 1
         fi
+    fi
+}
+
+check_for_updates() {
+    # Update checks are opt-in for privacy reasons
+    if [ "$conf_check_updates" != '1' ] && \
+        [ "$conf_check_updates" != 'true' ] && \
+        [ "$conf_check_updates" != 'yes' ]; then
+        log 'INFO' "Program update checking is not enabled"
+        return
+    fi
+    latest_version_tag="$(
+        curl -s "$update_api" | \
+        jq -r .tag_name
+    )"
+    if [ $? -ne 0 ] || [ -z "$latest_version_tag" ] || [ "$latest_version_tag" = "null" ]; then
+        log 'WARN' 'Failed to check for program updates: network or API error'
+        return
+    fi
+    # Calculate update type based on SemVer difference
+    update_type="$(
+        awk -v ver="$version" -v latest="$latest_version_tag" \
+        'BEGIN {
+            split(ver, v, ".")
+            split(latest, l, ".")
+            if (l[1] > v[1]) {
+                print "major"
+            } else if (l[1] == v[1] && l[2] > v[2]) {
+                print "minor"
+            } else if (l[1] == v[1] && l[2] == v[2] && l[3] > v[3]) {
+                print "patch"
+            } else {
+                print "none"
+            }
+        }'
+    )"
+    if [ "$update_type" = 'none' ]; then
+        log 'INFO' "No program updates are available"
+    else
+        log 'WARN' "A $update_type-level update v$latest_version_tag is available at '$upstream'"
     fi
 }
 
@@ -677,6 +721,7 @@ EOF
     test_cfg_file && \
     load_settings && \
     create_log_file && \
+    check_for_updates && \
     load_and_test_api_key && \
     load_records && \
     test_interfaces && \
