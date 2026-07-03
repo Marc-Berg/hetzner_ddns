@@ -104,7 +104,7 @@ To quickly get up and running, the following minimal configuration can be used:
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "api_key": "****************************************************************",
   "zones": [
     {
@@ -172,6 +172,7 @@ It will update both `A` and `AAAA` records for domain root `example.com` and its
   {
     "settings": {
       "log_file": "", // Path to a custom configuration file
+      "log_level": "warn", // Log level (info, warn, error, none)
       "ip_check_cooldown": 30, // Time between subsequent checks of interface's IP address
       "request_timeout": 10, // Maximum duration of HTTP requests
       "api_url": "https://api.hetzner.cloud/v1", // URL of the Hetzner Console's API

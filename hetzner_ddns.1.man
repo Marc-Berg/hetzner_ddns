@@ -20,6 +20,9 @@ Use specified configuration file
 .BR \-l " " \fIlog_file\fR
 Use specified log file
 .TP
+.BR \-L " " \fIlog_level\fR
+Log level (info, warn, error, none)
+.TP
 .BR \-P " " \fIpid_file\fR
 Use specified PID file when daemonized
 .TP
@@ -40,6 +43,9 @@ The configuration file uses JSON format with the following structure:
 .TP
 .BR log_file
 Path to a custom configuration file
+.TP
+.BR log_level
+Log level (info, warn, error, none)
 .TP
 .BR ip_check_cooldown
 Time between subsequent checks of interface's IP address
