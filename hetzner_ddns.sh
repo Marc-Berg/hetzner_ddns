@@ -119,6 +119,8 @@ Options:
 echo '
 Configuration:
 
+    "api_key": Read-write API key (64 characters) or an absolute file path containing it
+
     "settings": {
       "log_file": Path to a custom configuration file
       "log_level": Log level (info, warn, error, none)
@@ -205,27 +207,43 @@ check_daemon_already_running() {
 }
 
 load_and_test_api_key() {
-    api_key="$(jq -r '.api_key' "$cfg_file")"
-
-    # also try to load the api_key from .api_key_file
-    api_key_file_path=$(jq -r '.api_key_file' "$cfg_file")
-    api_key_from_file="$(cat "$api_key_file_path")"
-
-    if ([ -z "$api_key" ] || [ "$api_key" = 'null' ]) && [ -z "$api_key_from_file" ]; then
-        log 'Error: API key neither provided through api_key in config.json nor through api_key_file'
-        return 1
+    api_key_field="$(jq -r '.api_key' "$cfg_file")"
+    if [ -z "$api_key_field" ] || [ "$api_key_field" = 'null' ]; then
+        log 'ERROR' 'API key not provided'
     fi
-    if ([ -n "$api_key" ] && [ "$api_key" != 'null' ]) && [ -n "$api_key_from_file" ]; then
-        log 'Error: API key provided through BOTH config and file'
-        return 1
+    # Determine if API key is provided inline or in a file
+    api_key_type="$(awk -v key="$api_key_field" 'BEGIN {
+        if (key ~ /^\//) {
+            print "file"
+        } else if (length(key) == 64 && key ~ /^[a-zA-Z0-9]+$/) {
+            print "inline"
+        } else {
+            print "invalid"
+        }
+    }')"
+    if [ "$api_key_type" = 'invalid' ]; then
+        log 'ERROR' 'Invalid API key field format'
+        return 1;
     fi
-    if [ -z "$api_key" ] || [ "$api_key" = 'null' ]; then
-	 	api_key=$api_key_from_file
+    # Load API key from file
+    if [ "$api_key_type" = 'file' ]; then
+        if ! [ -r "$api_key_field" ]; then
+            log 'ERROR' 'Provided API key file is not readable'
+            return 1
+        fi
+        log 'INFO' 'API key supplied in a file'
+        api_key="$(
+            cat "$api_key_field" | tr -d '[:space:]'
+        )"
+        if [ "$(printf '%s' "$api_key" | wc -m | tr -d '[:space:]')" != 64 ]; then
+            log 'ERROR' 'Invalid API key format'
+            return 1
+        fi
+    else
+        api_key="$api_key_field"
+        log 'INFO' 'API key supplied inline'
     fi
-    if [ "$(printf '%s' "$api_key" | wc -m | tr -d '[:space:]')" != 64 ]; then
-        log 'Error: Invalid API key format'
-        return 1
-    fi
+    # Test key validity by querying the server
     if [ "$(curl \
             --connect-timeout "$conf_request_timeout" --max-time "$conf_request_timeout" \
             -H "Authorization: Bearer $api_key" \

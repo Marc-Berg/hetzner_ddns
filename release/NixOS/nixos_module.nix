@@ -20,7 +20,7 @@ in
       default = pkgs.callPackage ./default.nix {};
       description = "The package providing the hetzner_ddns executable/shell-script.";
     };
-    
+
     protections = lib.mkOption {
       type = lib.types.bool;
       default = true;
@@ -36,13 +36,7 @@ in
     api_key = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
       default = null;
-      description = "Key for the Hetzner API.";
-    };
-    
-    api_key_file = lib.mkOption {
-      type = lib.types.nullOr lib.types.str;
-      default = null;
-      description = "Path to file containing API key for the Hetzner API.";
+      description = "Key for the Hetzner API or full path to the file containing it.";
     };
 
     settings = lib.mkOption {
@@ -53,37 +47,37 @@ in
             default = null;
             description = "log file";
           };
-          
+
           ip_check_cooldown = lib.mkOption {
             type = lib.types.ints.positive;
             default = 30;
             description = "Cooldown time in seconds between IP address checks.";
           };
-          
+
           request_timeout = lib.mkOption {
             type = lib.types.ints.positive;
             default = 10;
             description = "Timeout for API requests in seconds.";
           };
-          
+
           api_url = lib.mkOption {
             type = lib.types.str;
             default = "https://api.hetzner.cloud/v1";
             description = "API URL for Hetzner DNS service.";
           };
-          
+
           ip_url = lib.mkOption {
             type = lib.types.str;
             default = "https://ip.hetzner.com/";
             description = "URL for fetching public IP address.";
           };
-          
+
         };
       };
       default = {};
       description = "settings values";
     };
-    
+
     defaults = lib.mkOption {
       type = lib.types.submodule {
         options = {
@@ -166,7 +160,7 @@ in
         Restart = "always";
         RestartSec = 60;
         DynamicUser = true;
-        
+
       } // (if cfg.protections == true then {
         PermissionsStartOnly = true;
         NoNewPrivileges = "yes";

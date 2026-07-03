@@ -125,7 +125,8 @@ It will update both `A` and `AAAA` records for domain root `example.com` and its
 > All records have to be added in the [Hetzner Console](https://console.hetzner.com/) first, and only have one record per every name and type combination. The utility will otherwise terminate to prevent unexpected modifications.
 >
 > An API key can be also obtained in the Console, under Security > API tokens > Generate API token, and selecting Read & Write option.
-> The API key can also be configured to be read from a file, using the `api_key_file` option in the config.json file.
+>
+> The API key can also be configured to be read from a file, by providing an absolute file path to `api_key` option in the configuration JSON file.
 
 <details>
     <summary>
@@ -289,14 +290,14 @@ sudo systemctl reload hetzner_ddns
 
   # advanced
   services.hetzner_ddns = {
-    protections = true; # enables protection settings in the systemd service. might cause permission problems with reading the api_key_file
+    protections = true; # enables protection settings in the systemd service. might cause permission problems with reading the api_key
     settings = {...}; # same as the settings in the config.json
     defaults = {...}; # same as the defaults in the config.json
-    api_key_file = "/path/to/api_key_file";
+    api_key = "/path/to/api_key";
     api_key = "************************";
   }
   systemd.services.hetzner_ddns.serviceConfig = {
-    User = "myUser"; # the user under which the service will run. useful when using api_key_file but has security implications
+    User = "myUser"; # the user under which the service will run. useful when using api_key but has security implications
   };
   ```
 
