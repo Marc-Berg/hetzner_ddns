@@ -283,7 +283,7 @@ sudo systemctl reload hetzner_ddns
       rev = "v1.1.0-ipv6-monitor";
       # also update the hash when updating to a new version!!
       # an error with the correct sha256 will be printed when rebuilding (but only if you make it an empty string first)
-      sha256 = "sha256-trouNNC2vq43hVVZ1fnJggjrsXSHQt3MGw+VkxSg5dY="
+      sha256 = "sha256-nz78mFIYevb2rUTpZgW2m1EF621zubKkNWsgX1vl/RM="
     })}/release/NixOS/nixos_module.nix"
   ];
   ```
