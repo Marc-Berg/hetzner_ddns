@@ -1,7 +1,7 @@
 #!/bin/sh
 
 program='hetzner_ddns'
-version='1.1.0'
+version='1.1.1'
 upstream='https://github.com/filiparag/hetzner_ddns'
 update_api='https://api.github.com/repos/filiparag/hetzner_ddns/releases/latest'
 detach=0
@@ -728,36 +728,13 @@ update_interface_ip() {
         return
     fi
     old_value="$(cat "$state_dir/if_${interface}_ipv${version}_addr")"
-    record_comment="Modified by $program on $(uname -n) at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     if [ "$version" = '6' ]; then
         new_value="$(select_linux_ipv6_address "$interface")"
     fi
     if [ -z "$new_value" ]; then
         new_value="$(
-        if [ "$conf_auto_create_records" = 1 ]; then
-            if curl -s -X POST -H "Authorization: Bearer $api_key" \
-                    -H "Content-Type: application/json" \
-                    -d "{
-                        \"name\": \"$name\",
-                        \"type\": \"$type\",
-                        \"ttl\": $ttl,
-                        \"records\": [
-                            {
-                                \"value\": \"$expected_value\",
-                                \"comment\": \"$record_comment\"
-                            }
-                        ]
-                    }" \
-                    "$conf_api_url/zones/$domain/rrsets" >/dev/null; then
-                log 'INFO' "Created $type record '$name' for domain '$domain': $expected_value"
-            else
-                log 'WARN' "Unable to create $type record '$name' for domain '$domain'"
-                return 1
-            fi
-            return 0
-        fi
-        log "Warning: Unable to fetch value of $type record $name for domain $domain"
-        return 1
+            curl --connect-timeout "$conf_request_timeout" --max-time "$conf_request_timeout" \
+                --interface "$interface" -"$version" "$conf_ip_url" 2>/dev/null
         )"
     fi
     if [ -z "$new_value" ]; then
@@ -768,7 +745,6 @@ update_interface_ip() {
     if [ "$old_value" != "$new_value" ]; then
         echo "$new_value" > "$state_dir/if_${interface}_ipv${version}_addr"
         log "Interface '$interface' has a new IPv$version address $new_value"
-                        \"comment\": \"$record_comment\"
         log "Interface '$interface' kept IPv$version address $new_value"
     fi
 }
