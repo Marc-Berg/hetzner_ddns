@@ -36,7 +36,7 @@ Feel free to contribute to [first-party support](./release) for other operating 
 
   ```shell
   # Download
-  git clone --branch 1.0.1 \
+  git clone --branch 1.1.0 \
     --single-branch --depth 1 \
     https://github.com/filiparag/hetzner_ddns.git
   cd hetzner_ddns
@@ -104,7 +104,7 @@ To quickly get up and running, the following minimal configuration can be used:
 
 ```json
 {
-  "version": "1.0.0",
+  "version": "1.1.0",
   "api_key": "****************************************************************",
   "zones": [
     {
@@ -125,7 +125,7 @@ It will update both `A` and `AAAA` records for domain root `example.com` and its
 > All records have to be added in the [Hetzner Console](https://console.hetzner.com/) first, and only have one record per every name and type combination. The utility will otherwise terminate to prevent unexpected modifications.
 >
 > An API key can be also obtained in the Console, under Security > API tokens > Generate API token, and selecting Read & Write option.
-> The API key can also be configured to be read from a file, using the `api_key_file` option in the config.json file.
+> The API key can also be configured to be read from a file, either by providing an absolute file path in `api_key` or by using the legacy `api_key_file` option in the config.json file.
 
 <details>
     <summary>
@@ -172,10 +172,13 @@ It will update both `A` and `AAAA` records for domain root `example.com` and its
   {
     "settings": {
       "log_file": "", // Path to a custom configuration file
+      "log_level": "warn", // Log level (info, warn, error, none)
       "ip_check_cooldown": 30, // Time between subsequent checks of interface's IP address
       "request_timeout": 10, // Maximum duration of HTTP requests
       "api_url": "https://api.hetzner.cloud/v1", // URL of the Hetzner Console's API
       "ip_url": "https://ip.hetzner.com/", // URL of a service for retreiving external IP addresses
+      "check_updates": true, // Check for program updates on GitHub (opt-in)
+      "auto_create_records": true, // Automatically create missing DNS records (default: false)
       "ipv6_event_monitor": false, // Linux-only: trigger immediate updates from IPv6 interface events
       "ipv6_event_cooldown": 10, // Minimal number of seconds between event-driven update triggers
       "ipv6_event_require_global": true // Process only global-scoped IPv6 events

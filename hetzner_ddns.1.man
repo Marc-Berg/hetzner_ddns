@@ -1,10 +1,11 @@
-.TH hetzner_ddns 1 "2025-12-04" "hetzner_ddns 1.0.1" "Manual for hetzner_ddns"
+.TH hetzner_ddns 1 "2026-08-19" "hetzner_ddns 1.1.0" "Manual for hetzner_ddns"
 .SH NAME
 hetzner_ddns \- Hetzner Dynamic DNS Daemon
 .SH SYNOPSIS
 .B hetzner_ddns
 [\fB\-c\fR \fIconfig_file\fR]
 [\fB\-l\fR \fIlog_file\fR]
+[\fB\-L\fR \fIlog_level\fR]
 [\fB\-V\fR]
 [\fB\-d\fR]
 [\fB\-h\fR]
@@ -19,6 +20,9 @@ Use specified configuration file
 .TP
 .BR \-l " " \fIlog_file\fR
 Use specified log file
+.TP
+.BR \-L " " \fIlog_levelR
+Set log level (info, warn, error, none)
 .TP
 .BR \-P " " \fIpid_file\fR
 Use specified PID file when daemonized
@@ -41,6 +45,9 @@ The configuration file uses JSON format with the following structure:
 .BR log_file
 Path to a custom configuration file
 .TP
+.BR log_level
+Log level (info, warn, error, none)
+.TP
 .BR ip_check_cooldown
 Time between subsequent checks of interface's IP address
 .TP
@@ -52,6 +59,12 @@ URL of the Hetzner Console's API
 .TP
 .BR ip_url
 URL of a service for retrieving external IP addresses
+.TP
+.BR check_updates
+Check for program updates on GitHub (true/false)
+.TP
+.BR auto_create_records
+Automatically create missing DNS records (true/false)
 .TP
 .BR ipv6_event_monitor
 Enable immediate IPv6-triggered updates on Linux (true/false)

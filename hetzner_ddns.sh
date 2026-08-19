@@ -1,7 +1,9 @@
 #!/bin/sh
 
 program='hetzner_ddns'
-version='1.0.1'
+version='1.1.0'
+upstream='https://github.com/filiparag/hetzner_ddns'
+update_api='https://api.github.com/repos/filiparag/hetzner_ddns/releases/latest'
 detach=0
 verbose=0
 cfg_file="/usr/local/etc/${program}.json"
@@ -9,20 +11,49 @@ pid_file="/var/run/${program}.pid"
 
 # User-modifiable settings
 conf_log_file=
+conf_log_level='INFO'
 conf_ip_check_cooldown=30
 conf_request_timeout=10
 conf_api_url='https://api.hetzner.cloud/v1'
 conf_ip_url='https://ip.hetzner.com/'
+conf_check_updates=0
+conf_auto_create_records=0
 conf_ipv6_event_monitor='true'
 conf_ipv6_event_cooldown=10
 conf_ipv6_event_require_global='true'
 
 log() {
+    level='INFO'
+    message="$1"
+    if [ "$#" -ge 2 ]; then
+        level="$1"
+        message="$2"
+    else
+        case "$message" in
+            Error:*)
+                level='ERROR'
+                message="${message#Error: }";;
+            Warning:*)
+                level='WARN'
+                message="${message#Warning: }";;
+        esac
+    fi
+    if [ "$conf_log_level" = 'NONE' ]; then
+        return
+    elif [ "$conf_log_level" = 'ERROR' ]; then
+        if [ "$level" != 'ERROR' ]; then
+            return
+        fi
+    elif [ "$conf_log_level" = 'WARN' ]; then
+        if [ "$level" != 'ERROR' ] && [ "$level" != 'WARN' ]; then
+            return
+        fi
+    fi
     if test -r "$conf_log_file"; then
-        printf '[%s] %s\n' "$(date +"%Y-%m-%dT%H:%M:%S%z")" "$1" >> "$conf_log_file"
+        printf '[%s] %s %s\n' "$(date +"%Y-%m-%dT%H:%M:%S%z")" "$level" "$message" >> "$conf_log_file"
     fi
     if [ "$verbose" = 1 ]; then
-        >&2 printf '[%s] %s\n' "$(date +"%Y-%m-%dT%H:%M:%S%z")" "$1"
+        >&2 printf '[%s] %s %s\n' "$(date +"%Y-%m-%dT%H:%M:%S%z")" "$level" "$message"
     fi
 }
 
@@ -47,12 +78,14 @@ test_dependencies() {
 }
 
 parse_cli_args() {
-    while getopts c:l:P:vVdh opt; do
+    while getopts c:l:L:P:vVdh opt; do
         case "$opt" in
             c)
                 cfg_file="$OPTARG";;
             l)
                 conf_log_file="$OPTARG";;
+            L)
+                conf_log_level_override="$OPTARG";;
             P)
                 pid_file="$OPTARG";;
             v)
@@ -82,6 +115,7 @@ Options:
 
     -c <file>   Use specified configuration file
     -l <file>   Use specified log file
+    -L <level>  Log level (info, warn, error, none)
     -P <file>   Use specified PID file when daemonized
     -V          Display all log messages to stderr
     -d          Detach from current shell and run as a daemon
@@ -91,15 +125,20 @@ Options:
 echo '
 Configuration:
 
+    "api_key": Read-write API key (64 characters) or an absolute file path containing it
+
     "settings": {
       "log_file": Path to a custom configuration file
+      "log_level": Log level (info, warn, error, none)
       "ip_check_cooldown": Time between subsequent checks of interface'\''s IP address
       "request_timeout": Maximum duration of HTTP requests
       "api_url": URL of the Hetzner Console'\''s API
       "ip_url": URL of a service for retrieving external IP addresses
-            "ipv6_event_monitor": Enable immediate IPv6-triggered updates on Linux (true/false)
-            "ipv6_event_cooldown": Minimal number of seconds between IPv6 event triggers
-            "ipv6_event_require_global": React only to global IPv6 addresses (true/false)
+      "check_updates": Check for program updates on GitHub (default: false)
+      "auto_create_records": Automatically create missing DNS records (default: false)
+      "ipv6_event_monitor": Enable immediate IPv6-triggered updates on Linux (true/false)
+      "ipv6_event_cooldown": Minimal number of seconds between IPv6 event triggers
+      "ipv6_event_require_global": React only to global IPv6 addresses (true/false)
     }
 
     "defaults": {
@@ -179,32 +218,39 @@ check_daemon_already_running() {
 }
 
 load_and_test_api_key() {
-    api_key="$(jq -r '.api_key' "$cfg_file")"
+    api_key_field="$(jq -r '.api_key' "$cfg_file")"
+    api_key_file_path="$(jq -r '.api_key_file' "$cfg_file")"
+    api_key_source='inline'
 
-    # also try to load the api_key from .api_key_file
-    api_key_file_path=$(jq -r '.api_key_file' "$cfg_file")
-    api_key_from_file=''
     if [ -n "$api_key_file_path" ] && [ "$api_key_file_path" != 'null' ]; then
-        if [ ! -r "$api_key_file_path" ]; then
-            log "Error: API key file '$api_key_file_path' is not readable"
+        if [ -n "$api_key_field" ] && [ "$api_key_field" != 'null' ]; then
+            log 'ERROR' 'API key provided through BOTH config and file'
             return 1
         fi
-        api_key_from_file="$(cat "$api_key_file_path")"
+        if [ ! -r "$api_key_file_path" ]; then
+            log 'ERROR' "API key file '$api_key_file_path' is not readable"
+            return 1
+        fi
+        api_key="$(tr -d '[:space:]' < "$api_key_file_path")"
+        api_key_source='file'
+    else
+        if [ -z "$api_key_field" ] || [ "$api_key_field" = 'null' ]; then
+            log 'ERROR' 'API key not provided'
+            return 1
+        fi
+        if [ "$(printf '%s' "$api_key_field" | wc -m | tr -d '[:space:]')" = 64 ]; then
+            api_key="$api_key_field"
+        elif [ -r "$api_key_field" ]; then
+            api_key="$(tr -d '[:space:]' < "$api_key_field")"
+            api_key_source='file'
+        else
+            log 'ERROR' 'Invalid API key field format'
+            return 1
+        fi
     fi
 
-    if ([ -z "$api_key" ] || [ "$api_key" = 'null' ]) && [ -z "$api_key_from_file" ]; then
-        log 'Error: API key neither provided through api_key in config.json nor through api_key_file'
-        return 1
-    fi
-    if ([ -n "$api_key" ] && [ "$api_key" != 'null' ]) && [ -n "$api_key_from_file" ]; then
-        log 'Error: API key provided through BOTH config and file'
-        return 1
-    fi
-    if [ -z "$api_key" ] || [ "$api_key" = 'null' ]; then
-	 	api_key=$api_key_from_file
-    fi
     if [ "$(printf '%s' "$api_key" | wc -m | tr -d '[:space:]')" != 64 ]; then
-        log 'Error: Invalid API key format'
+        log 'ERROR' 'Invalid API key format'
         return 1
     fi
     if [ "$(curl \
@@ -213,13 +259,13 @@ load_and_test_api_key() {
             -I -w "%{http_code}" \
             -s -o /dev/null \
             "$conf_api_url/zones")" != 200 ]; then
-        log 'Error: Provided API key is unauthorized'
+        log 'ERROR' 'Provided API key is unauthorized'
         return 1
     fi
-    if [ -n "$api_key_from_file" ]; then
-        log "Loaded valid API key from file: $api_key_file_path"
+    if [ "$api_key_source" = 'file' ]; then
+        log 'INFO' "Loaded valid API key from file: '$api_key_file_path'"
     else
-        log 'Loaded valid API key from config'
+        log 'INFO' 'Loaded valid API key from the configuration file'
     fi
 }
 
@@ -228,9 +274,40 @@ load_settings() {
         eval "$(jq -r '.settings | to_entries[] | "conf_\(.key)='\''\(.value|tostring)'\''"' "$cfg_file")"
         log 'Loaded user settings from configuration file'
     fi
+    if [ -n "$conf_log_level_override" ]; then
+        conf_log_level="$conf_log_level_override"
+    fi
 }
 
 validate_settings() {
+    case "$conf_log_level" in
+        info|INFO|3)
+            conf_log_level='INFO';;
+        warn|warning|WARN|WARNING|2)
+            conf_log_level='WARN';;
+        error|ERROR|1)
+            conf_log_level='ERROR';;
+        none|NONE|false|FALSE|off|OFF|0)
+            conf_log_level='NONE';;
+        *)
+            conf_log_level='INFO'
+            log 'ERROR' 'Invalid log level, falling back to INFO';;
+    esac
+    log 'INFO' "Set log level to '$conf_log_level'"
+    case "$conf_check_updates" in
+        1|true|TRUE|yes|YES|on|ON)
+            conf_check_updates=1
+            log 'INFO' 'Program update checking is enabled';;
+        *)
+            conf_check_updates=0;;
+    esac
+    case "$conf_auto_create_records" in
+        1|true|TRUE|yes|YES|on|ON)
+            conf_auto_create_records=1
+            log 'INFO' 'Automatic missing record creation is enabled';;
+        *)
+            conf_auto_create_records=0;;
+    esac
     case "$conf_ipv6_event_monitor" in
         true|false) ;;
         *)
@@ -251,6 +328,38 @@ validate_settings() {
     if [ "$conf_ipv6_event_cooldown" -lt 1 ]; then
         conf_ipv6_event_cooldown=1
         log "Warning: Value of ipv6_event_cooldown too small, falling back to '$conf_ipv6_event_cooldown'"
+    fi
+}
+
+check_for_updates() {
+    if [ "$conf_check_updates" != '1' ]; then
+        log 'INFO' 'Program update checking is not enabled'
+        return
+    fi
+    latest_version_tag="$(curl -s "$update_api" | jq -r .tag_name)"
+    if [ $? -ne 0 ] || [ -z "$latest_version_tag" ] || [ "$latest_version_tag" = 'null' ]; then
+        log 'WARN' 'Failed to check for program updates: network or API error'
+        return
+    fi
+    update_type="$(awk -v ver="$version" -v latest="$latest_version_tag" '
+        BEGIN {
+            split(ver, v, ".")
+            split(latest, l, ".")
+            if (l[1] > v[1]) {
+                print "major"
+            } else if (l[1] == v[1] && l[2] > v[2]) {
+                print "minor"
+            } else if (l[1] == v[1] && l[2] == v[2] && l[3] > v[3]) {
+                print "patch"
+            } else {
+                print "none"
+            }
+        }
+    ')"
+    if [ "$update_type" = 'none' ]; then
+        log 'INFO' 'No program updates are available'
+    else
+        log 'WARN' "A $update_type-level update v$latest_version_tag is available at '$upstream'"
     fi
 }
 
@@ -376,8 +485,13 @@ EOF
                 jq '.rrset.records | length'
         )"
         if [ "$record_entries" -eq 0 ]; then
-            log "Error: $record_type record '$record_name' for domain '$record_domain' doesn't exist in Hetzner Console"
-            return 1
+            if [ "$conf_auto_create_records" = 1 ]; then
+                log 'INFO' "$record_type record '$record_name' for domain '$record_domain' does not exist and will be created"
+            else
+                log "Error: $record_type record '$record_name' for domain '$record_domain' doesn't exist in Hetzner Console"
+                log 'INFO' 'To allow automatic record creation set `auto_create_records` option to true'
+                return 1
+            fi
         elif [ "$record_entries" -gt 1 ]; then
             log "Error: $record_type record '$record_name' for domain '$record_domain' has more than one entry"
             return 1
@@ -614,13 +728,36 @@ update_interface_ip() {
         return
     fi
     old_value="$(cat "$state_dir/if_${interface}_ipv${version}_addr")"
+    record_comment="Modified by $program on $(uname -n) at $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
     if [ "$version" = '6' ]; then
         new_value="$(select_linux_ipv6_address "$interface")"
     fi
     if [ -z "$new_value" ]; then
         new_value="$(
-            curl --connect-timeout "$conf_request_timeout" --max-time "$conf_request_timeout" \
-                --interface "$interface" -"$version" "$conf_ip_url" 2>/dev/null
+        if [ "$conf_auto_create_records" = 1 ]; then
+            if curl -s -X POST -H "Authorization: Bearer $api_key" \
+                    -H "Content-Type: application/json" \
+                    -d "{
+                        \"name\": \"$name\",
+                        \"type\": \"$type\",
+                        \"ttl\": $ttl,
+                        \"records\": [
+                            {
+                                \"value\": \"$expected_value\",
+                                \"comment\": \"$record_comment\"
+                            }
+                        ]
+                    }" \
+                    "$conf_api_url/zones/$domain/rrsets" >/dev/null; then
+                log 'INFO' "Created $type record '$name' for domain '$domain': $expected_value"
+            else
+                log 'WARN' "Unable to create $type record '$name' for domain '$domain'"
+                return 1
+            fi
+            return 0
+        fi
+        log "Warning: Unable to fetch value of $type record $name for domain $domain"
+        return 1
         )"
     fi
     if [ -z "$new_value" ]; then
@@ -631,7 +768,7 @@ update_interface_ip() {
     if [ "$old_value" != "$new_value" ]; then
         echo "$new_value" > "$state_dir/if_${interface}_ipv${version}_addr"
         log "Interface '$interface' has a new IPv$version address $new_value"
-    else
+                        \"comment\": \"$record_comment\"
         log "Interface '$interface' kept IPv$version address $new_value"
     fi
 }
@@ -754,6 +891,7 @@ log "Starting $program $version"
     load_settings && \
     create_log_file && \
     validate_settings && \
+    check_for_updates && \
     load_and_test_api_key && \
     load_records && \
     test_interfaces && \
