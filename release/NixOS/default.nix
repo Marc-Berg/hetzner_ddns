@@ -8,8 +8,8 @@
 }:
 
 stdenv.mkDerivation rec {
-	pname = "hetzner_ddns";
-	version = "1.0.1";
+  pname = "hetzner_ddns";
+  version = "1.1.0";
 
 	src = ../../.;
 	

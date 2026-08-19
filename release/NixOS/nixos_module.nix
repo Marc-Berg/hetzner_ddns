@@ -53,6 +53,12 @@ in
             default = null;
             description = "log file";
           };
+
+          log_level = lib.mkOption {
+            type = lib.types.nullOr lib.types.str;
+            default = null;
+            description = "Log level override.";
+          };
           
           ip_check_cooldown = lib.mkOption {
             type = lib.types.ints.positive;
@@ -76,6 +82,36 @@ in
             type = lib.types.str;
             default = "https://ip.hetzner.com/";
             description = "URL for fetching public IP address.";
+          };
+
+          check_updates = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Enable update checks against GitHub releases.";
+          };
+
+          auto_create_records = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Create missing DNS records automatically.";
+          };
+
+          ipv6_event_monitor = lib.mkOption {
+            type = lib.types.bool;
+            default = false;
+            description = "Enable IPv6 event monitoring on Linux.";
+          };
+
+          ipv6_event_cooldown = lib.mkOption {
+            type = lib.types.ints.positive;
+            default = 10;
+            description = "Cooldown between IPv6 event triggers.";
+          };
+
+          ipv6_event_require_global = lib.mkOption {
+            type = lib.types.bool;
+            default = true;
+            description = "Limit IPv6 event monitoring to global-scoped addresses.";
           };
           
         };
